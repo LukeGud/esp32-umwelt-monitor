@@ -15,10 +15,13 @@ const char* password = "Schanzenshop100";
 
 //Intervalle
 unsigned long letzteMessung = 0;
+unsigned long letzteLichtMessung = 0;
 int messungWartezeit = 5000;
+int lichtMessungIntervall = 500;
 
 //Pins
 const int ldrPin = 32; 
+const int lichtLEDPin = 27;
 
 void startseiteSenden() {
   float temp = bmp.readTemperature();
@@ -31,6 +34,8 @@ void startseiteSenden() {
 
 void setup() {
   Serial.begin(115200);
+
+  pinMode(lichtLEDPin, OUTPUT);
 
   WiFi.mode(WIFI_STA);
   WiFi.begin(ssid, password);
@@ -71,6 +76,10 @@ void loop() {
     Serial.println(analogRead(ldrPin));
   }
 
+  if (jetzt - letzteLichtMessung > lichtMessungIntervall) {
+    letzteLichtMessung = jetzt;
+    analogWrite(lichtLEDPin, (4095 - analogRead(ldrPin)) / 16);
+  }
 
 }
 
