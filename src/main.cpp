@@ -22,6 +22,10 @@ int lichtMessungIntervall = 500;
 //Pins
 const int ldrPin = 32; 
 const int lichtLEDPin = 27;
+const int refreshPin = 17;
+
+//Interrupt flag
+volatile bool refreshSignal = false;
 
 void startseiteSenden() {
   float temp = bmp.readTemperature();
@@ -32,10 +36,17 @@ void startseiteSenden() {
   server.send(200, "text/html", htmlSeite);
 }
 
+void IRAM_ATTR refreshISR() {
+  refreshSignal = true;
+}
+
 void setup() {
   Serial.begin(115200);
 
   pinMode(lichtLEDPin, OUTPUT);
+  pinMode(refreshPin, INPUT_PULLUP);
+
+  attachInterrupt(digitalPinToInterrupt(refreshPin), refreshISR, FALLING);
 
   WiFi.mode(WIFI_STA);
   WiFi.begin(ssid, password);
@@ -64,7 +75,8 @@ void loop() {
 
   server.handleClient();
 
-  if (jetzt - letzteMessung > messungWartezeit) {
+  // Gibt Sensorwerte auf Monitor aus
+  if (jetzt - letzteMessung > messungWartezeit || refreshSignal) {
     letzteMessung = jetzt;
 
     Serial.print("Temperatur: ");
@@ -74,8 +86,10 @@ void loop() {
     Serial.println(bmp.readPressure() / 100.0F);
     Serial.print("Helligkeit: ");
     Serial.println(analogRead(ldrPin));
+    refreshSignal = false;
   }
 
+  // LED reagiert auf Licht
   if (jetzt - letzteLichtMessung > lichtMessungIntervall) {
     letzteLichtMessung = jetzt;
     analogWrite(lichtLEDPin, (4095 - analogRead(ldrPin)) / 16);
