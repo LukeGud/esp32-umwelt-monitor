@@ -9,6 +9,9 @@
 WebServer server(80);
 Adafruit_BMP280 bmp;
 
+//Switch Speicher
+bool modeGewechselt = false;
+
 //WiFi
 const char* ssid = "BLLLM";
 const char* password = "Schanzenshop100";
@@ -16,13 +19,16 @@ const char* password = "Schanzenshop100";
 //Intervalle
 unsigned long letzteMessung = 0;
 unsigned long letzteLichtMessung = 0;
+unsigned long letzterModeSwitch = 0;
 int messungWartezeit = 5000;
 int lichtMessungIntervall = 500;
+int debounce = 50;
 
 //Pins
 const int ldrPin = 32; 
 const int lichtLEDPin = 27;
 const int refreshPin = 17;
+const int modePin = 18;
 
 //Interrupt flag
 volatile bool refreshSignal = false;
@@ -36,15 +42,26 @@ void startseiteSenden() {
   server.send(200, "text/html", htmlSeite);
 }
 
+//ISR
 void IRAM_ATTR refreshISR() {
   refreshSignal = true;
 }
+
+//FSM Modi
+enum Betriebsmodus {
+  NORMALBETRIEB,
+  SCHLAFMODUS,
+  FEHLER
+};
+Betriebsmodus aktuellerModus = NORMALBETRIEB;
+
 
 void setup() {
   Serial.begin(115200);
 
   pinMode(lichtLEDPin, OUTPUT);
   pinMode(refreshPin, INPUT_PULLUP);
+  pinMode(modePin, INPUT_PULLUP);
 
   attachInterrupt(digitalPinToInterrupt(refreshPin), refreshISR, FALLING);
 
@@ -75,25 +92,63 @@ void loop() {
 
   server.handleClient();
 
-  // Gibt Sensorwerte auf Monitor aus
-  if (jetzt - letzteMessung > messungWartezeit || refreshSignal) {
-    letzteMessung = jetzt;
+  bool modeSwitchSignal = !digitalRead(modePin);
 
-    Serial.print("Temperatur: ");
-    Serial.print(bmp.readTemperature());
-    Serial.println("°C");
-    Serial.print("Luftdruck: ");
-    Serial.println(bmp.readPressure() / 100.0F);
-    Serial.print("Helligkeit: ");
-    Serial.println(analogRead(ldrPin));
-    refreshSignal = false;
+  switch(aktuellerModus) {
+    case NORMALBETRIEB: 
+      // Gibt Sensorwerte auf Monitor aus
+      if (jetzt - letzteMessung > messungWartezeit || refreshSignal) {
+        letzteMessung = jetzt;
+
+        Serial.print("Temperatur: ");
+        Serial.print(bmp.readTemperature());
+        Serial.println("°C");
+        Serial.print("Luftdruck: ");
+        Serial.println(bmp.readPressure() / 100.0F);
+        Serial.print("Helligkeit: ");
+        Serial.println(analogRead(ldrPin));
+        Serial.println(aktuellerModus);
+        refreshSignal = false;
+      }
+
+      // LED reagiert auf Licht
+      if (jetzt - letzteLichtMessung > lichtMessungIntervall) {
+        letzteLichtMessung = jetzt;
+        analogWrite(lichtLEDPin, (4095 - analogRead(ldrPin)) / 16);
+      }
+      break;
+
+    case SCHLAFMODUS: 
+    // Gibt Sensorwerte auf Monitor aus aber nur alle 60 Sekunden
+      if (jetzt - letzteMessung > 60000 || refreshSignal) {
+          letzteMessung = jetzt;
+
+          Serial.print("Temperatur: ");
+          Serial.print(bmp.readTemperature());
+          Serial.println("°C");
+          Serial.print("Luftdruck: ");
+          Serial.println(bmp.readPressure() / 100.0F);
+          Serial.print("Helligkeit: ");
+          Serial.println(analogRead(ldrPin));
+          Serial.println(aktuellerModus);
+          refreshSignal = false;
+        }
   }
 
-  // LED reagiert auf Licht
-  if (jetzt - letzteLichtMessung > lichtMessungIntervall) {
-    letzteLichtMessung = jetzt;
-    analogWrite(lichtLEDPin, (4095 - analogRead(ldrPin)) / 16);
-  }
+  //Wechselt Modus
+      if (jetzt - letzterModeSwitch > debounce && !modeGewechselt && modeSwitchSignal) {
+        if (aktuellerModus == NORMALBETRIEB) {
+          aktuellerModus = SCHLAFMODUS;
+          analogWrite(lichtLEDPin, 0);
+        } else {
+          aktuellerModus = NORMALBETRIEB;
+        }
+        letzterModeSwitch = jetzt;
+      };
+  
+  
+
+  modeGewechselt = modeSwitchSignal;
 
 }
 
