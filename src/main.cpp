@@ -19,10 +19,10 @@ const char* password = "Schanzenshop100";
 //Intervalle
 unsigned long letzteMessung = 0;
 unsigned long letzteLichtMessung = 0;
-unsigned long letzterModeSwitch = 0;
+volatile unsigned long letzterModeSwitch = 0;
 int messungWartezeit = 5000;
 int lichtMessungIntervall = 500;
-int debounce = 50;
+int debounce = 150;
 
 //Pins
 const int ldrPin = 32; 
@@ -42,19 +42,31 @@ void startseiteSenden() {
   server.send(200, "text/html", htmlSeite);
 }
 
-//ISR
-void IRAM_ATTR refreshISR() {
-  refreshSignal = true;
-}
-
 //FSM Modi
 enum Betriebsmodus {
   NORMALBETRIEB,
   SCHLAFMODUS,
   FEHLER
 };
-Betriebsmodus aktuellerModus = NORMALBETRIEB;
+volatile Betriebsmodus aktuellerModus = NORMALBETRIEB;
 
+//ISR
+void IRAM_ATTR refresh() {
+  refreshSignal = true;
+}
+
+void IRAM_ATTR modeSwitch() {
+  unsigned long isrjetzt = millis();
+  if (isrjetzt - letzterModeSwitch > debounce && !digitalRead(modePin)) {
+    if (aktuellerModus == NORMALBETRIEB) {
+      aktuellerModus = SCHLAFMODUS;
+      analogWrite(lichtLEDPin, 0);
+    } else {
+      aktuellerModus = NORMALBETRIEB;
+    }
+  }
+  letzterModeSwitch = isrjetzt;
+}
 
 void setup() {
   Serial.begin(115200);
@@ -63,7 +75,8 @@ void setup() {
   pinMode(refreshPin, INPUT_PULLUP);
   pinMode(modePin, INPUT_PULLUP);
 
-  attachInterrupt(digitalPinToInterrupt(refreshPin), refreshISR, FALLING);
+  attachInterrupt(digitalPinToInterrupt(refreshPin), refresh, FALLING);
+  attachInterrupt(digitalPinToInterrupt(modePin), modeSwitch, CHANGE);
 
   WiFi.mode(WIFI_STA);
   WiFi.begin(ssid, password);
@@ -134,21 +147,5 @@ void loop() {
           refreshSignal = false;
         }
   }
-
-  //Wechselt Modus
-      if (jetzt - letzterModeSwitch > debounce && !modeGewechselt && modeSwitchSignal) {
-        if (aktuellerModus == NORMALBETRIEB) {
-          aktuellerModus = SCHLAFMODUS;
-          analogWrite(lichtLEDPin, 0);
-        } else {
-          aktuellerModus = NORMALBETRIEB;
-        }
-        letzterModeSwitch = jetzt;
-      };
-  
-  
-
-  modeGewechselt = modeSwitchSignal;
-
 }
 
